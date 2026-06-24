@@ -731,6 +731,9 @@ app.delete("/api/address/:addressId", async (req, res) => {
 
 // ! post route for orderDetail
 
+// ============================================
+// ✅ CREATE ORDER - POST /api/order
+// ============================================
 async function createOrderDetails(newOrder) {
   try {
     const order = new Order(newOrder);
@@ -743,22 +746,24 @@ async function createOrderDetails(newOrder) {
 
 app.post("/api/order", async (req, res) => {
   try {
-    const { products, user, address } = req.body; // ✅ products array aayega ab
+    const { products, user, address } = req.body;
 
-    // ✅ Validation - products array check karo
+    // ✅ Validation
     if (!products || !Array.isArray(products) || products.length === 0) {
       return res.status(400).json({
+        success: false,
         message: "At least one product is required",
       });
     }
 
     if (!user || !address) {
       return res.status(400).json({
-        message: "User and Address are must required",
+        success: false,
+        message: "User and Address are required",
       });
     }
 
-    // ✅ Har product ko validate karo aur price fetch karo
+    // ✅ Validate each product and fetch price
     const productDetails = [];
     let totalPrice = 0;
 
@@ -767,14 +772,15 @@ app.post("/api/order", async (req, res) => {
 
       if (!productData) {
         return res.status(404).json({
+          success: false,
           message: `Product not found: ${item.productId}`,
         });
       }
 
-      // ✅ Check stock availability (optional)
       if (productData.stock < item.quantity) {
         return res.status(400).json({
-          message: `Insufficient stock for product: ${productData.name}`,
+          success: false,
+          message: `Insufficient stock for product: ${productData.productName}`,
         });
       }
 
@@ -784,13 +790,13 @@ app.post("/api/order", async (req, res) => {
       productDetails.push({
         product: item.productId,
         quantity: item.quantity,
-        price: productData.productPrice, // ✅ Product ki price store karo
+        price: productData.productPrice,
       });
     }
 
-    // ✅ Order create karo with multiple products
+    // ✅ Create order
     const order = new Order({
-      products: productDetails, // ✅ Array of products
+      products: productDetails,
       user,
       address,
       totalPrice,
@@ -799,70 +805,40 @@ app.post("/api/order", async (req, res) => {
 
     const savedOrder = await order.save();
 
-    // ✅ Populate karo sab fields ko
+    // ✅ Populate all fields
     const populatedOrder = await Order.findById(savedOrder._id)
-      .populate("products.product") // ✅ products array ke andar product populate
+      .populate("products.product")
       .populate("user")
       .populate("address");
 
-    if (order) {
-      res.status(201).json({
-        message: "Order placed successfully",
-        order: populatedOrder,
-      });
-    } else {
-      res
-        .status(404)
-        .json(
-          { error: "Something went wrong in data" },
-          console.error(error.message),
-        );
-    }
+    // ✅ FIXED: Consistent response
+    res.status(201).json({
+      success: true,
+      message: "Order placed successfully",
+      data: populatedOrder, // ✅ Changed from 'order' to 'data'
+    });
   } catch (error) {
     console.error(error.message);
     res.status(500).json({
+      success: false,
       message: "Failed to create order",
       error: error.message,
     });
   }
 });
 
-async function getOrderDetailsById(orderId) {
-  try {
-    const order = await Order.findById(orderId)
-      .populate("product")
-      .populate("user")
-      .populate("address")
-      .select("product address user totalPrice quantity orderStatus createdAt");
-    return order;
-  } catch (error) {
-    throw error;
-  }
-}
-
-// ! get route for orderDetail by orderId
-
-app.get("/api/order/:orderId", async (req, res) => {
-  try {
-    const order = await getOrderDetailsById(req.params.orderId);
-    if (!order) {
-      res.status(404).json({ error: "Order Id not found" });
-    } else {
-      res.status(201).json({ message: "Order Details is this: ", data: order });
-    }
-  } catch (error) {
-    res.status(500).json({ error: "Failed to Fetch Order Detail" });
-  }
-});
-
-// ! get route for all orderDetail
-
+// ============================================
+// ✅ GET ALL ORDERS - FIXED
+// ============================================
 async function getAllOrderDetail() {
   try {
-    const order = await Order.find()
-      .populate("product")
-      .select("product totalPrice quantity orderStatus createdAt");
-    return order;
+    const orders = await Order.find()
+      .populate("products.product")  // ✅ Only this - for new schema
+      .populate("user")
+      .populate("address")
+      .select("products totalPrice quantity orderStatus createdAt")
+      .sort({ createdAt: -1 });
+    return orders;
   } catch (error) {
     throw error;
   }
@@ -870,15 +846,69 @@ async function getAllOrderDetail() {
 
 app.get("/api/order", async (req, res) => {
   try {
-    const order = await getAllOrderDetail();
-    if (!order) {
-      res.status(404).json({ error: "Orders not found" });
-    } else {
-      res.status(201).json({ message: "Order Details is this: ", data: order });
+    const orders = await getAllOrderDetail();
+    
+    if (!orders || orders.length === 0) {
+      return res.status(200).json({
+        success: true,
+        message: "No orders found",
+        data: [],
+      });
     }
+
+    res.status(200).json({
+      success: true,
+      message: "Orders fetched successfully",
+      data: orders,
+    });
+
   } catch (error) {
-    res.status(500).json({ error: "Failed to Fetch Order Details" });
     console.error(error.message);
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch orders",
+    });
+  }
+});
+
+// ============================================
+// ✅ GET ORDER BY ID - FIXED
+// ============================================
+async function getOrderDetailsById(orderId) {
+  try {
+    const order = await Order.findById(orderId)
+      .populate("products.product")  // ✅ Only this
+      .populate("user")
+      .populate("address");
+    return order;
+  } catch (error) {
+    throw error;
+  }
+}
+
+app.get("/api/order/:orderId", async (req, res) => {
+  try {
+    const order = await getOrderDetailsById(req.params.orderId);
+    
+    if (!order) {
+      return res.status(404).json({
+        success: false,
+        message: "Order not found",
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      message: "Order details fetched successfully",
+      data: order,
+    });
+
+  } catch (error) {
+    console.error(error.message);
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch order details",
+    });
   }
 });
 
